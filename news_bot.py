@@ -1,23 +1,23 @@
 import feedparser
 import os
+import base64
 from datetime import datetime
 from openai import OpenAI
 
-print("ニュース取得開始")
+print("ニュース生成開始")
 
-# APIキー
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # フォルダ作成
 os.makedirs("articles", exist_ok=True)
+os.makedirs("images", exist_ok=True)
 
-# RSSニュース
 rss_url = "https://feeds.bbci.co.uk/news/world/rss.xml"
 feed = feedparser.parse(rss_url)
 
-links = ""
+cards = ""
 
-for i, entry in enumerate(feed.entries[:5], start=1):
+for i, entry in enumerate(feed.entries[:6], start=1):
 
     title = entry.title
     summary = entry.summary
@@ -25,140 +25,191 @@ for i, entry in enumerate(feed.entries[:5], start=1):
 
     print("ニュース:", title)
 
-    # SEOタイトル生成
-    seo_prompt = f"""
-次のニュースから日本人がクリックしたくなるニュースタイトルを作ってください。
+    # カテゴリー判定
+    category_prompt = f"""
+このニュースを次のカテゴリーから1つ選んでください
 
+戦争
+日本経済
+世界情勢
+安全保障
+エネルギー
+
+ニュース:
 {title}
 """
 
-    seo_response = client.responses.create(
+    category = client.responses.create(
         model="gpt-4.1-mini",
-        input=seo_prompt
-    )
+        input=category_prompt
+    ).output_text.strip()
 
-    seo_title = seo_response.output_text.strip()
-
-    # 記事生成
+    # 記事作成
     article_prompt = f"""
-あなたは戦争分析ニュースの専門ライターです。
+あなたは戦争と世界情勢を分析するニュース記者です。
 
-以下の構成で日本人向けの記事を書いてください。
+以下の構成で記事を書いてください
 
-① 現在の戦争状況  
-② 日本経済への影響  
-③ 今後どうなる可能性  
-④ 日本が取るべき対策  
-⑤ なぜこの戦争が起きたか  
-⑥ 今後の予測シナリオ  
+① 今起きていること
+② 日本への影響
+③ 今後どうなるか
+④ 日本の対策
+⑤ なぜ起きたのか
+⑥ 未来シナリオ
 
-ルール
-・オリジナル文章
-・分析形式
-・最後に参考情報を書く
+最後に参考情報を書く
 
-ニュースタイトル
+ニュース
 {title}
 
-ニュース内容
+内容
 {summary}
 """
 
-    article_response = client.responses.create(
+    article = client.responses.create(
         model="gpt-4.1-mini",
         input=article_prompt
-    )
+    ).output_text
 
-    article = article_response.output_text
-
-    # AI画像生成
+    # サムネイル生成
     image = client.images.generate(
         model="gpt-image-1",
-        prompt="国際戦争ニュースの分析記事用イメージ。世界地図と緊張した国際情勢。",
+        prompt=f"ニュース記事サムネイル 世界地図と国際情勢 {category}",
         size="1024x1024"
     )
 
-    image_url = image.data[0].url
+    image_base64 = image.data[0].b64_json
+    image_bytes = base64.b64decode(image_base64)
 
-    # URL用タイトル
-    slug = seo_title.replace(" ", "-").replace("　", "-")
-    slug = slug[:40]
+    image_file = f"images/thumb{i}.png"
 
-    filename = f"articles/{slug}.html"
+    with open(image_file,"wb") as f:
+        f.write(image_bytes)
+
+    filename = f"articles/article{i}.html"
 
     html = f"""
 <html>
+
 <head>
+
 <meta charset="UTF-8">
-<title>{seo_title}</title>
+
+<title>{title}</title>
 
 <style>
-body {{
-font-family: Arial;
+
+body{{
+background:#0f172a;
+color:white;
+font-family:Arial;
 max-width:900px;
 margin:auto;
 padding:20px;
 line-height:1.8;
 }}
 
-.category {{
-background:black;
-color:white;
+.category{{
+background:#b91c1c;
 display:inline-block;
-padding:5px 10px;
+padding:4px 10px;
 margin-bottom:10px;
 }}
 
-img {{
+img{{
 width:100%;
 margin:20px 0;
 }}
+
+.back{{
+display:inline-block;
+margin-top:40px;
+color:#f59e0b;
+}}
+
 </style>
 
 </head>
 
 <body>
 
-<div class="category">戦争分析</div>
+<div class="category">{category}</div>
 
-<h1>{seo_title}</h1>
+<h1>{title}</h1>
 
 <p>{date}</p>
 
-<img src="{image_url}">
+<img src="../{image_file}">
 
 <p>{article.replace(chr(10),"<br>")}</p>
 
+<a class="back" href="../index.html">← ニュース一覧へ戻る</a>
+
 </body>
+
 </html>
 """
 
-    with open(filename, "w", encoding="utf-8") as f:
+    with open(filename,"w",encoding="utf-8") as f:
         f.write(html)
 
-    print("記事作成:", filename)
+    cards += f"""
 
-    links += f'<li><a href="{filename}">{seo_title}</a></li>\n'
+<div class="card">
+
+<a href="{filename}">
+<img src="{image_file}">
+<h2>{title}</h2>
+</a>
+
+<p>{category}</p>
+
+</div>
+
+"""
 
 # トップページ
 
-index_html = f"""
+index = f"""
 <html>
+
 <head>
+
 <meta charset="UTF-8">
+
 <title>戦争分析ニュース</title>
 
 <style>
 
-body {{
-font-family: Arial;
-max-width:900px;
+body{{
+background:#0f172a;
+color:white;
+font-family:Arial;
+max-width:1000px;
 margin:auto;
 padding:20px;
 }}
 
-li {{
-margin:15px 0;
+h1{{
+border-bottom:3px solid #b91c1c;
+padding-bottom:10px;
+}}
+
+.card{{
+background:#1e293b;
+padding:15px;
+margin-bottom:25px;
+border-radius:10px;
+}}
+
+.card img{{
+width:100%;
+border-radius:8px;
+}}
+
+a{{
+color:white;
+text-decoration:none;
 }}
 
 </style>
@@ -169,19 +220,16 @@ margin:15px 0;
 
 <h1>戦争分析ニュース</h1>
 
-<p>世界の戦争と日本経済への影響を分析するニュースサイト</p>
+<p>戦争・世界情勢・日本経済を分析するニュースサイト</p>
 
-<ul>
-
-{links}
-
-</ul>
+{cards}
 
 </body>
+
 </html>
 """
 
-with open("index.html", "w", encoding="utf-8") as f:
-    f.write(index_html)
+with open("index.html","w",encoding="utf-8") as f:
+    f.write(index)
 
 print("サイト更新完了")
