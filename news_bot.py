@@ -17,7 +17,7 @@ feed = feedparser.parse(rss_url)
 
 cards = ""
 
-for i, entry in enumerate(feed.entries[:6], start=1):
+for i, entry in enumerate(feed.entries[:10], start=1):
 
     title = entry.title
     summary = entry.summary
@@ -233,3 +233,4 @@ with open("index.html","w",encoding="utf-8") as f:
     f.write(index)
 
 print("サイト更新完了")
+
